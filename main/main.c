@@ -91,6 +91,8 @@ blehr_advertise(void)
     struct ble_hs_adv_fields fields;
     int rc;
 
+    MODLOG_DFLT(INFO, "[ADV] Starting advertising...\n");
+
     /*
      *  Set the advertisement data included in our advertisements:
      *     o Flags (indicates advertisement type and other general info)
@@ -121,9 +123,10 @@ blehr_advertise(void)
 
     rc = ble_gap_adv_set_fields(&fields);
     if (rc != 0) {
-        MODLOG_DFLT(ERROR, "error setting advertisement data; rc=%d\n", rc);
+        MODLOG_DFLT(ERROR, "[ADV] error setting advertisement data; rc=%d\n", rc);
         return;
     }
+    MODLOG_DFLT(INFO, "[ADV] Advertisement fields set successfully\n");
 
     /* Begin advertising */
     memset(&adv_params, 0, sizeof(adv_params));
@@ -132,9 +135,10 @@ blehr_advertise(void)
     rc = ble_gap_adv_start(blehr_addr_type, NULL, BLE_HS_FOREVER,
                            &adv_params, blehr_gap_event, NULL);
     if (rc != 0) {
-        MODLOG_DFLT(ERROR, "error enabling advertisement; rc=%d\n", rc);
+        MODLOG_DFLT(ERROR, "[ADV] error enabling advertisement; rc=%d\n", rc);
         return;
     }
+    MODLOG_DFLT(INFO, "[ADV] Advertising started successfully\n");
 }
 
 static void
@@ -238,53 +242,77 @@ blehr_gap_event(struct ble_gap_event *event, void *arg)
     switch (event->type) {
     case BLE_GAP_EVENT_CONNECT:
         /* A new connection was established or a connection attempt failed */
-        MODLOG_DFLT(INFO, "connection %s; status=%d\n",
+        MODLOG_DFLT(INFO, "[GAP] connection %s; status=%d\n",
                     event->connect.status == 0 ? "established" : "failed",
                     event->connect.status);
 
         if (event->connect.status != 0) {
             /* Connection failed; resume advertising */
+            MODLOG_DFLT(INFO, "[GAP] Connection failed, resuming advertising\n");
             blehr_advertise();
+        } else {
+            conn_handle = event->connect.conn_handle;
+            MODLOG_DFLT(INFO, "[GAP] conn_handle=%d\n", conn_handle);
         }
-        conn_handle = event->connect.conn_handle;
         break;
 
     case BLE_GAP_EVENT_DISCONNECT:
-        MODLOG_DFLT(INFO, "disconnect; reason=%d\n", event->disconnect.reason);
+        MODLOG_DFLT(INFO, "[GAP] disconnect; reason=%d (0x%02x)\n",
+                    event->disconnect.reason, event->disconnect.reason);
+        MODLOG_DFLT(INFO, "[GAP] Connection terminated, attempting to resume advertising\n");
+
+        /* Reset connection state */
+        conn_handle = 0;
+        notify_state = false;
+        temp_notify_state = false;
+
+        /* Stop heart rate timer */
+        blehr_tx_hrate_stop();
 
         /* Connection terminated; resume advertising */
         blehr_advertise();
         break;
 
     case BLE_GAP_EVENT_ADV_COMPLETE:
-        MODLOG_DFLT(INFO, "adv complete\n");
+        MODLOG_DFLT(INFO, "[GAP] adv complete; reason=%d\n", event->adv_complete.reason);
         blehr_advertise();
         break;
 
     case BLE_GAP_EVENT_SUBSCRIBE:
-        MODLOG_DFLT(INFO, "subscribe event; cur_notify=%d\n",
-                    event->subscribe.cur_notify);
+        MODLOG_DFLT(INFO, "[GAP] subscribe event; attr_handle=%d cur_notify=%d prev_notify=%d\n",
+                    event->subscribe.attr_handle,
+                    event->subscribe.cur_notify,
+                    event->subscribe.prev_notify);
         if (event->subscribe.attr_handle == hrs_hrm_handle) {
-            MODLOG_DFLT(INFO, "  Heart Rate subscription; val_handle=%d\n", hrs_hrm_handle);
+            MODLOG_DFLT(INFO, "[GAP]   Heart Rate subscription\n");
             notify_state = event->subscribe.cur_notify;
             if (notify_state) {
+                MODLOG_DFLT(INFO, "[GAP]   HR notifications enabled, starting timer\n");
                 blehr_tx_hrate_reset();
             } else {
+                MODLOG_DFLT(INFO, "[GAP]   HR notifications disabled, stopping timer\n");
                 blehr_tx_hrate_stop();
             }
         } else if (event->subscribe.attr_handle == temp_meas_handle) {
-            MODLOG_DFLT(INFO, "  Temperature subscription; val_handle=%d\n", temp_meas_handle);
+            MODLOG_DFLT(INFO, "[GAP]   Temperature subscription\n");
             temp_notify_state = event->subscribe.cur_notify;
+            if (temp_notify_state) {
+                MODLOG_DFLT(INFO, "[GAP]   Temp notifications enabled\n");
+            } else {
+                MODLOG_DFLT(INFO, "[GAP]   Temp notifications disabled\n");
+            }
         }
-        ESP_LOGI("BLE_GAP_SUBSCRIBE_EVENT", "conn_handle from subscribe=%d", conn_handle);
         break;
 
     case BLE_GAP_EVENT_MTU:
-        MODLOG_DFLT(INFO, "mtu update event; conn_handle=%d mtu=%d\n",
+        MODLOG_DFLT(INFO, "[GAP] mtu update event; conn_handle=%d mtu=%d\n",
                     event->mtu.conn_handle,
                     event->mtu.value);
         break;
 
+    default:
+        MODLOG_DFLT(INFO, "[GAP] unhandled event type=%d\n", event->type);
+        break;
     }
 
     return 0;
@@ -295,13 +323,19 @@ blehr_on_sync(void)
 {
     int rc;
 
+    MODLOG_DFLT(INFO, "[SYNC] BLE host synced\n");
+
     rc = ble_hs_id_infer_auto(0, &blehr_addr_type);
+    if (rc != 0) {
+        MODLOG_DFLT(ERROR, "[SYNC] error setting address type; rc=%d\n", rc);
+        return;
+    }
     assert(rc == 0);
 
     uint8_t addr_val[6] = {0};
     rc = ble_hs_id_copy_addr(blehr_addr_type, addr_val, NULL);
 
-    MODLOG_DFLT(INFO, "Device Address: ");
+    MODLOG_DFLT(INFO, "[SYNC] Device Address: ");
     print_addr(addr_val);
     MODLOG_DFLT(INFO, "\n");
 
@@ -312,7 +346,7 @@ blehr_on_sync(void)
 static void
 blehr_on_reset(int reason)
 {
-    MODLOG_DFLT(ERROR, "Resetting state; reason=%d\n", reason);
+    MODLOG_DFLT(ERROR, "[RESET] Resetting state; reason=%d\n", reason);
 }
 
 void blehr_host_task(void *param)
@@ -326,9 +360,12 @@ void app_main(void)
 {
     int rc;
 
+    ESP_LOGI(tag, "BLE Heart Rate Sensor starting");
+
     /* Initialize NVS — it is used to store PHY calibration data */
     esp_err_t ret = nvs_flash_init();
     if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+        ESP_LOGI(tag, "Erasing NVS and re-initializing");
         ESP_ERROR_CHECK(nvs_flash_erase());
         ret = nvs_flash_init();
     }
@@ -336,9 +373,10 @@ void app_main(void)
 
     ret = nimble_port_init();
     if (ret != ESP_OK) {
-        MODLOG_DFLT(ERROR, "Failed to init nimble %d \n", ret);
+        MODLOG_DFLT(ERROR, "[INIT] Failed to init nimble; rc=%d\n", ret);
         return;
     }
+    MODLOG_DFLT(INFO, "[INIT] NimBLE initialized successfully\n");
 
     /* Initialize the NimBLE host configuration */
     ble_hs_cfg.sync_cb = blehr_on_sync;
@@ -353,10 +391,12 @@ void app_main(void)
     /* Set the default device name */
     rc = ble_svc_gap_device_name_set(device_name);
     assert(rc == 0);
+    MODLOG_DFLT(INFO, "[INIT] Device name set to: %s\n", device_name);
 
     /* Create temperature task - runs every 200ms */
     xTaskCreate(blehr_temperature_task, "blehr_temp_task", 2048, NULL, 5, &temp_task_handle);
 
+    MODLOG_DFLT(INFO, "[INIT] Starting BLE host task\n");
     /* Start the task */
     nimble_port_freertos_init(blehr_host_task);
 
