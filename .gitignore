@@ -22,20 +22,23 @@ build/
 *.o
 *.a
 *.out
-*.exe
+*.exe # For any host-side utilities compiled on Windows
 
 # ESP-IDF specific build outputs
 *.bin
 *.elf
 *.map
-flasher_args.json
+flasher_args.json # Generated in build directory
 sdkconfig.old
 sdkconfig
 
 # ESP-IDF dependencies
+# For older versions or manual component management
 /components/.idf/
 **/components/.idf/
+# For modern ESP-IDF component manager
 managed_components/
+# If ESP-IDF tools are installed/referenced locally to the project
 .espressif/
 
 # CMake generated files
@@ -70,19 +73,6 @@ Desktop.ini
 
 # User-specific configuration files
 *.user
-*.workspace
-*.suo
-*.sln.docstates
-
-# VS Code (keep settings.json if you want to share workspace settings)
-.vscode/*
-!.vscode/settings.json
-!.vscode/tasks.json
-!.vscode/launch.json
-
-# Serial monitor logs
-*.txt
-
-# Partition table binaries
-partitions.bin
-bootloader.bin
+*.workspace # General workspace files, can be from various tools
+*.suo       # Visual Studio Solution User Options
+*.sln.docstates # Visual Studio

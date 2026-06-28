@@ -25,15 +25,12 @@
 #include "services/gap/ble_svc_gap.h"
 #include "services/gatt/ble_svc_gatt.h"
 #include "blehr_sens.h"
-#include "os/os_mbuf.h"
 
 static const char *manuf_name = "Apache Mynewt ESP32 devkitC";
 static const char *model_num = "Mynewt HR Sensor demo";
 uint16_t hrs_hrm_handle;
-uint16_t temp_meas_handle;
-
-/* Current temperature value (simulated) - stored in IEEE 11073 format */
-static int32_t current_temperature = 3700;  /* 37.00°C in IEEE 11073 format */
+uint16_t temp_handle;
+uint16_t hum_handle;
 
 static int
 gatt_svr_chr_access_heart_rate(uint16_t conn_handle, uint16_t attr_handle,
@@ -46,6 +43,10 @@ gatt_svr_chr_access_device_info(uint16_t conn_handle, uint16_t attr_handle,
 static int
 gatt_svr_chr_access_temperature(uint16_t conn_handle, uint16_t attr_handle,
                                 struct ble_gatt_access_ctxt *ctxt, void *arg);
+
+static int
+gatt_svr_chr_access_humidity(uint16_t conn_handle, uint16_t attr_handle,
+                             struct ble_gatt_access_ctxt *ctxt, void *arg);
 
 static const struct ble_gatt_svc_def gatt_svr_svcs[] = {
     {
@@ -92,15 +93,21 @@ static const struct ble_gatt_svc_def gatt_svr_svcs[] = {
     },
 
     {
-        /* Service: Temperature (Health Thermometer) */
+        /* Service: Environmental Sensing (Temperature & Humidity) */
         .type = BLE_GATT_SVC_TYPE_PRIMARY,
-        .uuid = BLE_UUID16_DECLARE(GATT_TEMPERATURE_SERVICE_UUID),
+        .uuid = BLE_UUID16_DECLARE(GATT_TEMP_SVC_UUID),
         .characteristics = (struct ble_gatt_chr_def[])
         { {
-                /* Characteristic: Temperature Measurement */
-                .uuid = BLE_UUID16_DECLARE(GATT_TEMPERATURE_MEASUREMENT_UUID),
+                /* Characteristic: Temperature */
+                .uuid = BLE_UUID16_DECLARE(GATT_TEMP_CHR_UUID),
                 .access_cb = gatt_svr_chr_access_temperature,
-                .val_handle = &temp_meas_handle,
+                .val_handle = &temp_handle,
+                .flags = BLE_GATT_CHR_F_READ | BLE_GATT_CHR_F_NOTIFY,
+            }, {
+                /* Characteristic: Humidity */
+                .uuid = BLE_UUID16_DECLARE(GATT_HUM_CHR_UUID),
+                .access_cb = gatt_svr_chr_access_humidity,
+                .val_handle = &hum_handle,
                 .flags = BLE_GATT_CHR_F_READ | BLE_GATT_CHR_F_NOTIFY,
             }, {
                 0, /* No more characteristics in this service */
@@ -163,22 +170,39 @@ gatt_svr_chr_access_temperature(uint16_t conn_handle, uint16_t attr_handle,
 {
     uint16_t uuid;
     int rc;
-    uint8_t temp_data[5];  /* 1 byte flags + 4 bytes temperature */
 
     uuid = ble_uuid_u16(ctxt->chr->uuid);
 
-    if (uuid == GATT_TEMPERATURE_MEASUREMENT_UUID) {
-        /* Build temperature data in Health Thermometer format:
-         * Byte 0: Flags (0x00 = Celsius, no timestamp)
-         * Bytes 1-4: Temperature in IEEE 11073-20601 format
-         */
-        temp_data[0] = 0x00;  /* Flags: Celsius, no timestamp */
-        temp_data[1] = (current_temperature >> 0) & 0xFF;  /* Mantissa byte 0 */
-        temp_data[2] = (current_temperature >> 8) & 0xFF;  /* Mantissa byte 1 */
-        temp_data[3] = (current_temperature >> 16) & 0xFF; /* Mantissa byte 2 */
-        temp_data[4] = 0xFE;  /* Exponent: -2 (value * 10^-2 = °C) */
-        
-        rc = os_mbuf_append(ctxt->om, temp_data, sizeof(temp_data));
+    if (uuid == GATT_TEMP_CHR_UUID) {
+        /* For a READ request, return the current temperature value.
+         * The actual value is set in main.c and sent via notify,
+         * but for a direct read we provide a value on the fly. */
+        /* Temperature is stored as a 16-bit signed integer in 0.01 deg C units.
+         * e.g. 25.00°C = 2500 */
+        int16_t temp_val = 2700; /* 27.00°C default for read */
+        rc = os_mbuf_append(ctxt->om, &temp_val, sizeof(temp_val));
+        return rc == 0 ? 0 : BLE_ATT_ERR_INSUFFICIENT_RES;
+    }
+
+    assert(0);
+    return BLE_ATT_ERR_UNLIKELY;
+}
+
+static int
+gatt_svr_chr_access_humidity(uint16_t conn_handle, uint16_t attr_handle,
+                             struct ble_gatt_access_ctxt *ctxt, void *arg)
+{
+    uint16_t uuid;
+    int rc;
+
+    uuid = ble_uuid_u16(ctxt->chr->uuid);
+
+    if (uuid == GATT_HUM_CHR_UUID) {
+        /* For a READ request, return a default humidity value.
+         * Humidity is stored as a 16-bit unsigned integer in 0.01% units.
+         * e.g. 75.00% = 7500 */
+        uint16_t hum_val = 7500; /* 75.00% default for read */
+        rc = os_mbuf_append(ctxt->om, &hum_val, sizeof(hum_val));
         return rc == 0 ? 0 : BLE_ATT_ERR_INSUFFICIENT_RES;
     }
 

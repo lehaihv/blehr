@@ -35,12 +35,16 @@ extern "C" {
 #define GATT_MANUFACTURER_NAME_UUID             0x2A29
 #define GATT_MODEL_NUMBER_UUID                  0x2A24
 
-/* Custom Temperature Service configuration */
-#define GATT_TEMPERATURE_SERVICE_UUID           0x1809  /* Using standard Health Thermometer Service */
-#define GATT_TEMPERATURE_MEASUREMENT_UUID       0x2A1C  /* Temperature Measurement characteristic */
+/* Temperature Service (Environmental Sensing) */
+#define GATT_TEMP_SVC_UUID                      0x181A
+#define GATT_TEMP_CHR_UUID                      0x2A6E
+
+/* Humidity (Environmental Sensing) */
+#define GATT_HUM_CHR_UUID                       0x2A6F
 
 extern uint16_t hrs_hrm_handle;
-extern uint16_t temp_meas_handle;
+extern uint16_t temp_handle;
+extern uint16_t hum_handle;
 
 struct ble_hs_cfg;
 struct ble_gatt_register_ctxt;
